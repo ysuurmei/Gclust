@@ -12,73 +12,55 @@ library(intergraph)
 library(data.table)
 library(arules)
 
-# Loading the dataset ----
-#Load the groceries dataset
-data("Groceries")
-
-#Convert the S4 class data to a dataframe with a column 'Order_numbers' and "Items"
-df <- t(as.matrix(Groceries@data))*1
-colnames(df) <- Groceries@itemInfo$labels
-rownames(df) <- paste("Order", 1:nrow(df))
-df <- melt(df)
-df <- subset(df[df$value >0,], select = c("Var1", "Var2"))
-names(df) <- c("Order_number", "Item")
-head(df)
-
-df <- df %>% group_by(Order_number) %>% mutate(n = n())
-
-df <- df[df$n > 3,]
-levels(df) <- unique(df$Order_number)
-
-
 # Function definitions ----
 
 percent <- function(x, digits = 0, format = "f", ...) {
   paste0(formatC(100 * x, format = format, digits = digits, ...), "%")
 }
 
-ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.8){
-  tbl <- sort(table(results$cluster)[table(results$cluster)>x], decreasing = T)
+ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
+ 
+   tbl <- sort(table(results$cluster)[table(results$cluster)>x], decreasing = T)
   temp1 <- results[results$cluster == names(tbl)[[n]],]
   temp2 <- df[df$Order_number %in% temp1$Order_number,]
-  temp3 <- subset(temp2, select = c("Order_number", "Item"))
+  temp3 <- subset(temp2, select = c("Order_number", "Description"))
   temp4a <- data.table::melt(temp3, id = "Order_number", variable.name = "Var", value.factor = F)
-
+  
   temp4 <- dcast(temp4a, Order_number ~ value, fun.aggregate = length)
-
+  
   rownames(temp4) <- temp4$Order_number
   temp4 <- t(matrix(as.numeric(unlist(temp4)),nrow=nrow(temp4), dimnames = list(rownames(temp4), colnames(temp4))))
   print(ncol(temp4[-1,]))
   temp4 <- temp4[-1,]
-
- 
-    temp4 <- temp4[, order(colSums(temp4), decreasing = T)]
-    temp4[!rowSums(temp4)>=colcutoff*ncol(temp4) & temp4 > 0] <- -1
-
+  
+  
+  temp4 <- temp4[, order(colSums(temp4), decreasing = T)]
+  temp4[!rowSums(temp4)>=colcutoff*ncol(temp4) & temp4 > 0] <- -1
   
   
   
-
+  
+  
   temp5 <- data.table::melt(as.matrix(temp4), id = temp4$Order_number, variable.name = "Var")
-
+  
   srt <- temp5 %>% group_by(Var1) %>% summarize(sum = sum(value))
-
+  
   temp5$Var1 <- factor(temp5$Var1, levels=(temp5$Var1)[order(srt$sum, decreasing = F)])
   
   temp5 <- temp5
-
-
+  
+  
   if(nrow(temp4)> 30){
     warning("Large number of rows, only plotting 20 most significant items", call. = nrow(temp4) > 30)
     print("4")
-  if(!is.null(nrow(temp4))){
-    temp <- rowSums(temp4)[order(rowSums(temp4), decreasing = T)]
-  }
+    if(!is.null(nrow(temp4))){
+      temp <- rowSums(temp4)[order(rowSums(temp4), decreasing = T)]
+    }
     keeps <- c(names(temp[temp>0]), names(temp[(length(temp)-20):length(temp)]))
     temp5 <- temp5[temp5$Var1 %in% keeps,]
   }
   
-
+  
   plt <- ggplot(temp5, aes(as.numeric(as.factor(Var2)), Var1, fill = value)) + 
     theme_minimal()+
     geom_raster() + 
@@ -90,17 +72,17 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.8){
     )+ 
     scale_fill_gradient2(low="tomato", mid = "white",  high="#00A600FF")+
     scale_x_discrete(breaks = 1:length(unique(temp5$Var2)),
-                       labels = unique(temp5$Var2))
+                     labels = unique(temp5$Var2))
   
-
+  
   tblout <- temp2 %>% group_by(Order_number) %>%
     summarize(OrderSize = n()
     )
-
+  
   print(tblout, n = 50)
-
+  
   output <- list(clustertable = tbl, infotable = tblout, plot = plt)
-
+  
   return(output)
 }
 
@@ -158,23 +140,24 @@ gclust <- function(df, start = 1, finish = 0.5, step = 0.1, minMember = 10 ){
   clusters <- data.frame()
   i <- 1
   n <- (start-finish)/step
+  output <- list()
   
   while (start >= finish){
     pivot <- subset(df, select = c("Order_number", "Item"))
-
+    
     pivot <- pivot[!pivot$Order_number %in% clusters$Order_number,]
-
+    
     pivot <- data.table(pivot)
     pivot <- melt(pivot, id = "Order_number")
     pivot <- dcast(pivot, Order_number~value, fun = length)
-
+    
     dist <- as.matrix(pivot[,2:ncol(pivot)])
     dist[dist>0] <- 1
-
+    
     dist <- jaccard(dist)
     
     ind <- dist@x <= start
-
+    
     dist@x[ind] <- 0
     dist <- as.matrix(dist)
     rownames(dist) <- as.matrix(pivot[,1])
@@ -191,7 +174,18 @@ gclust <- function(df, start = 1, finish = 0.5, step = 0.1, minMember = 10 ){
     i <- i+1
     start <- start - step
   }
-  return(clusters)
+  
+  summary <- clustdist(clusters, df)
+  keeps <- summary[summary$Distance >= finish,1]
+  
+  summary <- summary[summary$Cluster %in% keeps,]
+  clusters <- clusters[clusters$cluster %in% keeps,]
+  
+  
+  output$clusters <- clusters
+  output$summary <- summary
+  
+  return(output)
 }
 
 checkclust <- function (check, check2, var1, var2){
@@ -260,45 +254,87 @@ clustoptim <- function(results, check, df, cutoff1 = 0.7, cutoff2 = 0.7){
   return(results2)
 }
 
-#Running the code ----
+removeWords <- function(str, stopwords) {
+  x <- unlist(strsplit(str, " "))
+  paste(x[!x %in% stopwords], collapse = " ")
+}
 
-results <- gclust(df, start = 1, finish = 0.1, step = 0.05, minMember = 4)
 
-check <- clustdist(results, df)
+# Loading the dataset ----
 
-results2 <- clustoptim(results, check, df, cutoff1 = 0.7, cutoff2 = 0.7)
+#Load the online retail order dataset
+  
+  df <- read.csv("OnlineRetail.csv", encoding = "UTF-8_BOM")
+  head(df)
+  
+  df <- df[,c(1,2,3)]
+  names(df)[1:2] <- c("Order_number", "ItemA", "Item_description")
+  
+  df$Item <- gsub("[^0-9]", "", df$ItemA)
+  
+  df <- df %>% group_by(Order_number) %>% mutate(n = n())
+  
+  keeps <- df[df$n >= 3 & df$n <= 25,]
+  df <- df[df$Order_number %in% keeps$Order_number,]
+  
+  
+  # Running the code for the Louvain algorithm ----
+  pivot <- subset(df, select = c("Order_number", "Item"))
+  pivot <- data.table(pivot)
+  pivot <- melt(pivot, id = "Order_number")
+  pivot <- dcast(pivot, Order_number~value, fun = length)
+  dist <- pivot[,2:ncol(pivot)]
+  
+  ind <- dist > 1
+  dist[ind] <- 0
+  gc()
+  dist <- jaccard(as.matrix(dist))
+  
+  start <- 0.35
+  ind <- dist@x <= start
+  dist@x[ind] <- 0
+  dist <- as.matrix(dist)
+  rownames(dist) <- as.matrix(pivot[,1])
+  
+  network <- graph_from_adjacency_matrix(dist, diag = F, weighted = T, add.rownames = T, mode = "undirected")
+  test <- cluster_louvain(network, weights = NA)
+  
+  results <- data.frame(Order_number = rownames(dist), cluster = test$membership, stringsAsFactors = F)
+  head(results)
+  
+  keeps <- table(results$cluster)[table(results$cluster)>=3]
+  results <- results[results$cluster %in% names(keeps),]
+  
+  summary <- clustdist(results, df = df)
+  
+  
+  sum(summary$n)
+  summary
+  as.numeric(summary$Distance) %*% as.numeric(summary$n/sum(summary$n))
+  cat(sum(summary$n), "Out of", length(unique(df$Order_number)), "Orders were clustered (", percent(sum(summary$n)/length(unique(df$Order_number)), digits = 1),")" )
+  length(summary$Cluster)
+
+outcome <- ClustPlot(2, 4, df = df, results = results, colcutoff = 0.3)
+outcome$plot
+outcome$clustertable
+
+
+# Running the code for the Gclust algorithm ----
+
+results <- gclust(df, start = 1, finish = 0.2, step = 0.05, minMember = 3)
+
+results2 <- clustoptim(results$clusters, results$summary, df, cutoff1 = 0.7, cutoff2 = 0.7)
 
 check2 <- clustdist(results2, df)
 
 checkclust(check, check2, "Distance", "cumsum")
 
-keeps <- check2[check2$Distance > 0.3,1]
+keeps <- check2[check2$Distance > 0.3, 1]
 results2 <- results2[results2$cluster %in% keeps,]
 
-outcome <- ClustPlot(5, 1, results = results2, df = df, colcutoff = 0.6)
+outcome <- ClustPlot(15, 1, results = results2, df = df, colcutoff = 0.5)
 
 outcome$plot
 sum(outcome$clustertable)
 outcome$clustertable
 
-
-# Compare with other methodologies ----
-
-df2 <- melt(subset(df, select = c("Order_number", "Item")), id.vars = "Order_number")
-dist <- dcast(df2, Order_number~value, fun = length)
-dist <- dist[,-1]
-dist <- as.matrix(dist)
-dist <- jaccard(dist)
-dist <- 1-dist
-
-test <- hclust(d = as.dist(dist), method = "complete")
-#plot(test)
-test2 <- cutree(test, h = 0.85)
-results <- data.frame(cbind(as.vector(unique(df2$Order_number)), test2))
-names(results) <- c("Order_number", "cluster")
-final <- clustdist(results, df)
-final[final$Distance > 0.1 & final$Distance != "NaN",]
-
-outcome <- ClustPlot(4, 1, results = results, df = df, colcutoff = 0.6)
-
-outcome$plot
