@@ -20,10 +20,10 @@ percent <- function(x, digits = 0, format = "f", ...) {
 
 ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
  
-   tbl <- sort(table(results$cluster)[table(results$cluster)>x], decreasing = T)
+  tbl <- sort(table(results$cluster)[table(results$cluster)>x], decreasing = T)
   temp1 <- results[results$cluster == names(tbl)[[n]],]
   temp2 <- df[df$Order_number %in% temp1$Order_number,]
-  temp3 <- subset(temp2, select = c("Order_number", "Description"))
+  temp3 <- subset(temp2, select = c("Order_number", "Item_description"))
   temp4a <- data.table::melt(temp3, id = "Order_number", variable.name = "Var", value.factor = F)
   
   temp4 <- dcast(temp4a, Order_number ~ value, fun.aggregate = length)
@@ -82,7 +82,7 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
   print(tblout, n = 50)
   
   output <- list(clustertable = tbl, infotable = tblout, plot = plt)
-  
+  print(plt)
   return(output)
 }
 
@@ -124,161 +124,36 @@ clustdist <- function(results, df){
     dist <- as.matrix(pivot[,2:ncol(pivot)])
     dist[dist>0] <- 1
     dist <- jaccard(dist)
-    temp2 <- c(i, signif(mean(dist[upper.tri(dist)]), digits = 2))
+    temp2 <- c(i, signif(mean(dist@x[upper.tri(dist)], na.rm =T), digits = 2))
     tblout <- rbind(tblout, temp2)
   }
+
+  if (nrow(tblout) <= 1) stop("No significant clusters, consider reducing 'minMember'")
+  
   
   tblout <- tblout[-1,]
-  #rownames(tblout) <- 1:nrow(tblout)
   tblout <- cbind(tblout, as.vector(tbl))
   names(tblout) <- c("Cluster", "Distance", "n")
+  tblout <- tblout[order(tblout$n, decreasing = T),]
   tblout$cumsum <- cumsum(tblout$n)
-  return(tblout)
+  rownames(tblout) <- 1:nrow(tblout)
+  
+  u_order <- length(unique(df$Order_number))
+  n_order <- sum(tblout$n) 
+  prct <- sum(tblout$n)/length(unique(df$Order_number))
+  n_clust <- length(tblout$Cluster)
+  avg_dist <- as.numeric(tblout$Distance) %*% as.numeric(tblout$n/sum(tblout$n))
+  
+  param <- data.frame(u_order = u_order, n_order = n_order, prct = prct, n_clust = n_clust, avg_dist = avg_dist)
+  
+  cat("\n", n_order, "Out of", u_order, "Orders were clustered (", percent(prct, digits = 1),")" )
+  cat("\nThe Orders are distributed over ", n_clust, "clusters, with an average within cluster similarity of", percent(avg_dist, digits = 2), "\n")
+  
+  
+  return(list(results = tblout, summarystats = param))
 }
 
-gclust <- function(df, start = 1, finish = 0.5, step = 0.1, minMember = 10 ){
-  clusters <- data.frame()
-  i <- 1
-  n <- (start-finish)/step
-  output <- list()
-  
-  while (start >= finish){
-    pivot <- subset(df, select = c("Order_number", "Item"))
-    
-    pivot <- pivot[!pivot$Order_number %in% clusters$Order_number,]
-    
-    pivot <- data.table(pivot)
-    pivot <- melt(pivot, id = "Order_number")
-    pivot <- dcast(pivot, Order_number~value, fun = length)
-    
-    dist <- as.matrix(pivot[,2:ncol(pivot)])
-    dist[dist>0] <- 1
-    
-    dist <- jaccard(dist)
-    
-    ind <- dist@x <= start
-    
-    dist@x[ind] <- 0
-    dist <- as.matrix(dist)
-    rownames(dist) <- as.matrix(pivot[,1])
-    
-    network <- graph_from_adjacency_matrix(dist, diag = F, weighted = T, add.rownames = T)
-    results <- data.frame(Order_number = pivot[,1], cluster = components(network)$membership)
-    results$cluster <- paste0(LETTERS[[i]], ":", results$cluster)
-    
-    tbl <- table(results$cluster)[table(results$cluster)>minMember]
-    clusters <- rbind(clusters, results[results$cluster %in% names(tbl),])
-    
-    cat("\nIteration", i, "is completed,", n-i+1, "iterations remaining")
-    
-    i <- i+1
-    start <- start - step
-  }
-  
-  summary <- clustdist(clusters, df)
-  keeps <- summary[summary$Distance >= finish,1]
-  
-  summary <- summary[summary$Cluster %in% keeps,]
-  clusters <- clusters[clusters$cluster %in% keeps,]
-  
-  
-  output$clusters <- clusters
-  output$summary <- summary
-  
-  return(output)
-}
-
-checkclust <- function (check, check2, var1, var2){
-  par(mar = c(5, 5, 3, 5))
-  plot(check[[var1]], type ="p",
-       col = "grey", ylim = c(0,1))
-  abline(lm(check[[var1]]~as.vector(1:nrow(check))), col = "grey")
-  par(new = TRUE)
-  plot(check[[var2]], type = "l", xaxt = "n", yaxt = "n",
-       ylab = "", xlab = "", col = "grey", lty = 2)
-  axis(side = 4)
-  mtext("Cumulative observations", side = 4, line = 3)
-  par(new = TRUE)
-  plot(check2[[var1]], type ="p", ylab = "Within Cluster Distance (Jaccard)",
-       main = "Cluster Distance Plot", xlab = "Cluster",
-       col = "blue", ylim = c(0,1))
-  abline(lm(check[[var1]]~as.vector(1:nrow(check))), col = "blue")
-  par(new = TRUE)
-  plot(check2[[var2]], type = "l", xaxt = "n", yaxt = "n",
-       ylab = "", xlab = "", col = "red", lty = 2)
-  axis(side = 4)
-  mtext("Cumulative observations", side = 4, line = 3)
-  
-  
-}
-
-clustoptim <- function(results, check, df, cutoff1 = 0.7, cutoff2 = 0.7){
-  templist <- data.frame()
-  results2 <- results
-  
-  for (i in unique(check$Cluster)){
-    temp1 <- results[results$cluster  == i,]
-    temp2 <- df[df$Order_number %in% temp1$Order_number,]
-    temp2 <- subset(temp2, select = c("Item", "Order_number"))
-    temp2 <- temp2[!duplicated(temp2),]
-    temp3 <- (table(temp2$Item)[table(temp2$Item) > cutoff1*length(unique(temp2$Order_number))])
-    templist <- bind_rows(templist, temp3)
-    
-  }
-  
-  templist[is.na(templist)] <- 0
-  templist[templist > 0] <- 1
-  rownames(templist) <- unique(check$Cluster)
-  templist <- as.matrix(templist)
-  dist <- jaccard(templist)
-  
-  dist[dist < cutoff2] = 0
-  
-  
-  rownames(dist) <- unique(check$Cluster)
-  network <- graph_from_adjacency_matrix(as.matrix(dist), diag = F, weighted = T, add.rownames = T)
-  member <- data.frame(Name = unique(check$Cluster), cluster = components(network)$membership)
-  
-  names <- names(table(member$cluster)[table(member$cluster)>1])
-  names <- member[member$cluster %in% names,]
-  
-  for (i in unique(names$cluster)){
-    rename <- names[names$cluster == i,]
-    
-    results2[results2$cluster %in% as.character(rename$Name),2] <- as.character(i)
-    
-  }
-  results2$cluster <- as.factor(results2$cluster)
-  levels(results2$cluster) <- 1:length(unique(results2$cluster))
-  results2 %>% group_by(cluster) %>% summarise(n=n()) %>% ungroup() %>% arrange(-n)
-  return(results2)
-}
-
-removeWords <- function(str, stopwords) {
-  x <- unlist(strsplit(str, " "))
-  paste(x[!x %in% stopwords], collapse = " ")
-}
-
-
-# Loading the dataset ----
-
-#Load the online retail order dataset
-  
-  df <- read.csv("OnlineRetail.csv", encoding = "UTF-8_BOM")
-  head(df)
-  
-  df <- df[,c(1,2,3)]
-  names(df)[1:2] <- c("Order_number", "ItemA", "Item_description")
-  
-  df$Item <- gsub("[^0-9]", "", df$ItemA)
-  
-  df <- df %>% group_by(Order_number) %>% mutate(n = n())
-  
-  keeps <- df[df$n >= 3 & df$n <= 25,]
-  df <- df[df$Order_number %in% keeps$Order_number,]
-  
-  
-  # Running the code for the Louvain algorithm ----
+to_adj <- function(df, start){
   pivot <- subset(df, select = c("Order_number", "Item"))
   pivot <- data.table(pivot)
   pivot <- melt(pivot, id = "Order_number")
@@ -286,55 +161,100 @@ removeWords <- function(str, stopwords) {
   dist <- pivot[,2:ncol(pivot)]
   
   ind <- dist > 1
-  dist[ind] <- 0
-  gc()
-  dist <- jaccard(as.matrix(dist))
+  dist[ind] <- 1
   
-  start <- 0.35
+  dist <- to_sparse(dist)
+  dist <- jaccard(dist)
+  
   ind <- dist@x <= start
   dist@x[ind] <- 0
-  dist <- as.matrix(dist)
-  rownames(dist) <- as.matrix(pivot[,1])
   
-  network <- graph_from_adjacency_matrix(dist, diag = F, weighted = T, add.rownames = T, mode = "undirected")
-  test <- cluster_louvain(network, weights = NA)
+  return(list(dist = dist, names = pivot[,1]))
+}
+
+louvain <- function(adj_matrix, names, minMember = 0){
   
-  results <- data.frame(Order_number = rownames(dist), cluster = test$membership, stringsAsFactors = F)
-  head(results)
+  network <- graph_from_adjacency_matrix(adj_matrix, diag = F, mode = "max", weighted = T) #Note undirected was default
+  clst <- cluster_louvain(network, weights = NA)
   
-  keeps <- table(results$cluster)[table(results$cluster)>=3]
-  results <- results[results$cluster %in% names(keeps),]
+  output <- data.frame(Order_number = names, cluster = clst$membership, stringsAsFactors = F)
   
+  keeps <- table(output$cluster)[table(output$cluster)>= minMember]
+  output <- output[output$cluster %in% names(keeps),]
+  return(output)
+  
+}
+
+optimizer <- function(df, min, max, step, minMember = 5){
+    
+  adj <- to_adj(df, start = min)
+  test <- data.frame()
+    
+  for (i in seq(min, max, step)){
+    cat("\n i = ", i)
+    ind <- adj$dist@x <= i
+    adj$dist@x[ind] <- 0
+    results <- louvain(adj_matrix = adj$dist, names = adj$names, minMember = minMember)
+    summary <- clustdist(results, df = df)
+    test <- rbind(test, cbind(summary$summarystats, i))
+
+  }
+  
+  optim = test[match(max(test$n_clust), test$n_clust),6]
+  mx <- 1.75*max(test$n_clust)
+  
+  plot <- ggplot(test, aes(x = i)) + 
+    geom_line(aes(y = prct, col = "blue")) +
+    geom_line(aes(y = avg_dist, col = "darkgreen")) +
+    scale_y_continuous(sec.axis = ~.*mx) +
+    geom_line(aes(y = n_clust/mx, col = "red")) +
+    geom_vline(xintercept = optim, color = "grey") +
+    geom_text(aes(x=optim+0.07, label= paste("Maximum @ ", optim), y=0.9), colour="black")+
+    scale_colour_manual(name = "Legend",
+                        values =c('blue'='blue','red'='red', 'darkgreen' ='darkgreen'), labels = c('%Orders clustered','Avg Clust simil', 'N clusters')) + 
+    theme(legend.position = c(0.8, 0.98), 
+          legend.justification = c(0, 1))
+  print(plot)
+  return(list(table = test, plot = plot))
+}
+
+to_sparse <- function(d_table){
+  
+  i_list <- lapply(d_table, function(x) which(x != 0))
+  counts <- unlist(lapply(i_list, length), use.names = F)
+  
+  sparseMatrix(
+    i = unlist(i_list, use.names = F),
+    j = rep(1:ncol(d_table), counts),
+    x = unlist(lapply(d_table, function(x) x[x != 0]), use.names = F),
+    dims = dim(d_table),
+    dimnames = list(NULL, names(d_table)))
+}
+
+# Loading the dataset ----
+
+  df <- read.csv("OnlineRetail.csv", encoding = "UTF-8_BOM")
+  
+  names(df)[1:3] <- c("Order_number", "ItemA", "Item_description")
+  
+  df$Item <- gsub("[^0-9]", "", df$ItemA)
+  df[nchar(df$Item)!=5,]$Item <- df[nchar(df$Item)!=5,]$ItemA
+  
+  df <- df %>% group_by(Order_number) %>% mutate(n = n())
+  
+  keeps <- df[df$n >= 15 & df$n <= 50,]
+  df <- df[df$Order_number %in% keeps$Order_number,]
+  
+  
+# Running the code for the Louvain algorithm ----
+  test <- optimizer(df = df, min = 0.1, max = 0.35, step = 0.05, minMember = 50)
+  
+  adj <- to_adj(df, start = 0.20) 
+  
+  results <- louvain(adj_matrix = adj$dist, names = adj$names, minMember = 50)
   summary <- clustdist(results, df = df)
-  
-  
-  sum(summary$n)
   summary
-  as.numeric(summary$Distance) %*% as.numeric(summary$n/sum(summary$n))
-  cat(sum(summary$n), "Out of", length(unique(df$Order_number)), "Orders were clustered (", percent(sum(summary$n)/length(unique(df$Order_number)), digits = 1),")" )
-  length(summary$Cluster)
-
-outcome <- ClustPlot(2, 4, df = df, results = results, colcutoff = 0.3)
-outcome$plot
-outcome$clustertable
-
-
-# Running the code for the Gclust algorithm ----
-
-results <- gclust(df, start = 1, finish = 0.2, step = 0.05, minMember = 3)
-
-results2 <- clustoptim(results$clusters, results$summary, df, cutoff1 = 0.7, cutoff2 = 0.7)
-
-check2 <- clustdist(results2, df)
-
-checkclust(check, check2, "Distance", "cumsum")
-
-keeps <- check2[check2$Distance > 0.3, 1]
-results2 <- results2[results2$cluster %in% keeps,]
-
-outcome <- ClustPlot(15, 1, results = results2, df = df, colcutoff = 0.5)
-
-outcome$plot
-sum(outcome$clustertable)
-outcome$clustertable
+  
+# Plotting the clustering outcomes ----
+  outcome <- ClustPlot(5, 4, df = df, results = results, colcutoff = 0.2)
 
