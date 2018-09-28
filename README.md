@@ -22,7 +22,7 @@ Thus the focus of this methodology is to uncover the hidden intent behind a set 
 #### The clustering problem ####
 In an ideal situation people would only buy milk, flour and eggs if they want to bake pancakes, and we would relate similar shopping cart by exactly matching their contents. However, in reality we see that some people like to put bacon in their pancakes, whilst others might prefer apples (Yes I’m Dutch….). Still we can argue that both customers are in fact shopping for pancakes.
 
-![Baking pankcakes](Gclust/Article/Bacon_Apple.PNG)
+![Baking pankcakes](https://github.com/ysuurmei/Gclust/blob/master/Article/Bacon_Apple.PNG)
 
 This is the core of the problem at hand, we want to be able to cluster together highly similar orders, whilst acknowledging that order contents can vary. Furthermore, we would like to know which of the items in the basket are key in characterizing the cluster. From a list of unknown market baskets we would like to end up with a classifier consisting of key items, which we subsequently can use to draw inference on the diffent clusters.
 

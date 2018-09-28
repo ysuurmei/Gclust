@@ -2,15 +2,9 @@
 library(reshape)
 library(dplyr)
 library(Matrix)
-library(fpc)
 library(igraph)
-library(RColorBrewer)
 library(ggplot2)
-library(ggforce)
-library(GGally)
-library(intergraph)
 library(data.table)
-library(arules)
 library(countrycode)
 
 
@@ -32,12 +26,12 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
   
   rownames(temp4) <- temp4$Order_number
   temp4 <- t(matrix(as.numeric(unlist(temp4)),nrow=nrow(temp4), dimnames = list(rownames(temp4), colnames(temp4))))
-  print(ncol(temp4[-1,]))
+
   temp4 <- temp4[-1,]
   
   
   temp4 <- temp4[, order(colSums(temp4), decreasing = T)]
-  #temp4 <- temp4[temp4>1] <- 1
+  temp4[temp4>1] <- 1
   temp4[!rowSums(temp4)>=colcutoff*ncol(temp4) & temp4 > 0] <- -1
   
   
@@ -67,7 +61,7 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
   
   if(nrow(temp4)> 30){
     warning("Large number of rows, only plotting 20 most significant items", call. = nrow(temp4) > 30)
-    print("4")
+
     if(!is.null(nrow(temp4))){
       temp <- rowSums(temp4)[order(rowSums(temp4), decreasing = T)]
     }
@@ -109,7 +103,7 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
                          Avg_value = mean(tblout$OrderValue),
                          Avg_size = mean(tblout$OrderSize))
   
-  print(tblout, n = 50)
+  print(tblout, n = 30)
   
   output <- list(clustertable = tbl, infotable = tblout, plot = plt, words = words, summary = sumtable)
   print(plt)
@@ -211,7 +205,7 @@ louvain <- function(adj_matrix, names, minMember = 0){
   
   keeps <- table(output$cluster)[table(output$cluster)>= minMember]
   output <- output[output$cluster %in% names(keeps),]
-  return(output)
+  return(list(results = output, network = network, cluster = clst))
   
 }
 
@@ -225,7 +219,7 @@ optimizer <- function(df, min, max, step, minMember = 5){
     ind <- adj$dist@x <= i
     adj$dist@x[ind] <- 0
     results <- louvain(adj_matrix = adj$dist, names = adj$names, minMember = minMember)
-    summary <- clustdist(results, df = df)
+    summary <- clustdist(results$results, df = df)
     test <- rbind(test, cbind(summary$summarystats, i))
 
   }
@@ -287,12 +281,11 @@ to_sparse <- function(d_table){
   adj <- to_adj(df, start = 0.20) 
   
   results <- louvain(adj_matrix = adj$dist, names = adj$names, minMember = 50)
-  summary <- clustdist(results, df = df)
+  summary <- clustdist(results$results, df = df)
   summary
   
 # Plotting the clustering outcomes ----
-  outcome <- ClustPlot(10, 4, df = df, results = results, colcutoff = 0.2)
+  outcome <- ClustPlot(5, 20, df = df, results = results, colcutoff = 0.2)
   outcome$summary
   outcome$words
   plot(as.factor(outcome$infotable$Country))
-  
