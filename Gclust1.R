@@ -11,6 +11,8 @@ library(GGally)
 library(intergraph)
 library(data.table)
 library(arules)
+library(countrycode)
+
 
 # Function definitions ----
 
@@ -35,6 +37,7 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
   
   
   temp4 <- temp4[, order(colSums(temp4), decreasing = T)]
+  #temp4 <- temp4[temp4>1] <- 1
   temp4[!rowSums(temp4)>=colcutoff*ncol(temp4) & temp4 > 0] <- -1
   
   
@@ -46,8 +49,20 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
   srt <- temp5 %>% group_by(Var1) %>% summarize(sum = sum(value))
   
   temp5$Var1 <- factor(temp5$Var1, levels=(temp5$Var1)[order(srt$sum, decreasing = F)])
+
+  #temp6 <- merge(temp5, subset(temp2, select = c("Item_description", "Order_number", "Usage Category")), 
+  #               by.x = c("Var1", "Var2"), by.y = c("Material_description", "Order_number"), all.x = T)
   
-  temp5 <- temp5
+  temp6a <- subset(temp2, select = c("Order_number", "CountryCode" ,"InvoiceDate"))
+  temp6a <- temp6a[temp6a$Order_number %in% temp5$Var2,]
+  temp6a <- temp6a[!duplicated(temp6a),]
+  temp6 <- merge(temp5, temp6a, by.x = "Var2",
+                 by.y = "Order_number", all.x = T, all.y = F)
+  temp6 <- temp6[!duplicated(temp6[,c(1,2,3)]),]
+  
+  temp6$lbls <- as.factor(paste(temp6$Country, temp6$InvoiceDate))
+  temp6$lbls1 <- as.factor(temp6$Country)
+  temp6$lbls2 <- as.factor(paste(year(temp6$InvoiceDate), "-", months.Date(temp6$InvoiceDate, abbreviate = T)))
   
   
   if(nrow(temp4)> 30){
@@ -65,23 +80,38 @@ ClustPlot <- function(n, x = 2, results, df, colcutoff = 0.3){
     theme_minimal()+
     geom_raster() + 
     geom_tile(colour="white" ,alpha = 0.1) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5),
           axis.title.x =  element_blank(),
           axis.title.y = element_blank(),
           panel.border = element_rect(colour = "grey50", fill=NA, size=1)
     )+ 
     scale_fill_gradient2(low="tomato", mid = "white",  high="#00A600FF")+
-    scale_x_discrete(breaks = 1:length(unique(temp5$Var2)),
-                     labels = unique(temp5$Var2))
+    scale_x_continuous(breaks = 1:length(unique(temp6$Var2)),
+                       labels = temp6$lbls1[seq(1, length(temp6$lbls1), nrow(temp6)/length(unique(temp6$Var2)))],
+                       sec.axis = sec_axis(~.,
+                                           breaks = 1:length(unique(temp6$Var2)),
+                                           labels = temp6$lbls2[seq(1, length(temp6$lbls2), nrow(temp6)/length(unique(temp6$Var2)))]))
   
+  
+  words <- table(strsplit(paste(temp2$Item_description, collapse = " "), " +"))/nrow(temp2)
+  words <- words[!is.na(words)]
+  words <- words[order(words, decreasing = T)]
+  words <- data.frame(Word = names(words)[1:20], Prct = percent(words[1:20], digits = 1))
   
   tblout <- temp2 %>% group_by(Order_number) %>%
-    summarize(OrderSize = n()
+    summarize(
+      OrderSize = n(),
+      OrderValue = sum(UnitPrice),
+      Country = first(CountryCode),
+      Date = first(InvoiceDate) 
     )
+  sumtable <- data.frame(N_Orders = length(unique(temp2$Order_number)),
+                         Avg_value = mean(tblout$OrderValue),
+                         Avg_size = mean(tblout$OrderSize))
   
   print(tblout, n = 50)
   
-  output <- list(clustertable = tbl, infotable = tblout, plot = plt)
+  output <- list(clustertable = tbl, infotable = tblout, plot = plt, words = words, summary = sumtable)
   print(plt)
   return(output)
 }
@@ -237,11 +267,16 @@ to_sparse <- function(d_table){
   
   names(df)[1:3] <- c("Order_number", "ItemA", "Item_description")
   
+  df$InvoiceDate <- as.Date(as.character(df$InvoiceDate), format = "%d-%m-%y")
+  df$CountryCode <- countrycode(df$Country, origin = "country.name", destination = "genc3c")
+  
+  df <- df[!is.na(df$CountryCode),]
+  
   df$Item <- gsub("[^0-9]", "", df$ItemA)
   df[nchar(df$Item)!=5,]$Item <- df[nchar(df$Item)!=5,]$ItemA
   
-  df <- df %>% group_by(Order_number) %>% mutate(n = n())
   
+  df <- df %>% group_by(Order_number) %>% mutate(n = n())
   keeps <- df[df$n >= 15 & df$n <= 50,]
   df <- df[df$Order_number %in% keeps$Order_number,]
   
@@ -256,5 +291,8 @@ to_sparse <- function(d_table){
   summary
   
 # Plotting the clustering outcomes ----
-  outcome <- ClustPlot(5, 4, df = df, results = results, colcutoff = 0.2)
-
+  outcome <- ClustPlot(10, 4, df = df, results = results, colcutoff = 0.2)
+  outcome$summary
+  outcome$words
+  plot(as.factor(outcome$infotable$Country))
+  
