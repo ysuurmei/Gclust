@@ -15,7 +15,7 @@ Before we start it is necessary to introduce the concept of orders and items. Co
 #### Representation of the problem ####
 The objective of this exercise is to group together, or cluster, similar sales orders. The central premise to this approach is that behind each (or a significant amount) sales order there is an unknown intent from the purchaser. Let us again take the example of a person going to the supermarket. Imagine someone puts milk, eggs and flour in their shopping basket. It is than reasonable to assume someone intends to use these to bake pancakes. The same can hold for any set of order data. This perspective is contrary to most research on order data, which focusses on the relationship between individual items, rather than orders. 
 
-![Baking pankcakes](./Article/Order_to_pancake.png?raw = true)
+![Baking pankcakes](../master/Article/Order_to_pancake.png?raw = true)
 
 Thus the focus of this methodology is to uncover the hidden intent behind a set of similar orders. And the effectiveness of the algorithm in clustering order sets will strongly depend on the premise that each order is related to some specific intent. The weaker this premise, the less applicable the algorithm will be. In the dataset for which this algorithm was first developed, this premise held quiet strongly. Unfortunately it holds less so for the Online Retail data, but it still serves to show the application of the methodology. 
 
